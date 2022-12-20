@@ -1,0 +1,160 @@
+---
+title: "Barcode"
+output: html_document
+date: "2022-12-20"
+---
+
+```{r}
+getwd()
+library("tidyverse")
+
+```
+
+miRNAseed sequence is in a .fa, so use Winzip to open and then convert to .txt format Next issue is that the format uses two rows per information, which doesn't work for reading into a table
+
+Solution:
+
+```{r}
+link <-"~/allmiRNAseed.txt"
+##Read the raw lines
+rawlines <-readLines(file(link))
+##Convert to one text string
+lines <- paste(rawlines[c(TRUE, FALSE)], rawlines[c(FALSE, TRUE)], 
+               collapse = "\n")
+##paste is used to combine multiple 
+##rawlines[c(TRUE, FALSE)] represents the odd lines, 
+##rawlines[c(FALSE, TRUE)] represents the even lines.
+##Both small lines are combined to one long line. 
+##Then, all long lines are combined into one single string 
+##with the argument collapse = "\n". 
+##The lines are separated by line breaks (\n).
+dat <- read.table(text = lines, na.string = "*") %>%
+unite(specie, V3, V4) 
+dat1 <-filter(dat, specie == "Homo_sapiens")
+print(dat1)
+```
+
+```{r}
+setwd("C:/Users/proli/OneDrive - The Pennsylvania State University/2022 Carrel Liu Lab/Alzheimers Computational/2022 Barcode")
+library("Biostrings")
+library("tidyverse")
+library("immunarch")
+library("universalmotif")
+nucruns <- vector(mode = 'character', length = 4) %>% DNAStringSet
+ni = 1
+for (i in 4) {
+  for (j in c('A', 'G', 'T', 'C')) {
+    nucruns[ni] = rep(j, i) %>% paste(collapse = '') %>% DNAStringSet
+    ni = ni + 1
+  }
+}
+
+##not sure what we have done
+twelvemers <- create_sequences("DNA", 200, 10) %>% DNAStringSet 
+cat(paste0('done generating 12mers at ', Sys.time()))
+
+#Each nucleotide occurs at least one
+missingone <- apply(alphabetFrequency(twelvemers)[,1:4], 1, function(x){any(x == 0)})
+twelvemers <- twelvemers[!missingone]
+cat(paste0('done removing twelvemers missing a nucleotide at ', Sys.time()))
+
+#Cut out those with nucleotide runs of 4 or more in a row
+hasnucruns <- vcountPDict(nucruns, twelvemers) %>% colSums
+hasnucruns <- hasnucruns > 0
+twelvemers <- twelvemers[!hasnucruns]
+cat(paste0('done removing 12mers with runs of 4 or more at ', Sys.time()))
+print(twelvemers)
+
+#Cut out those that match the miRNA seed sequences 
+#For now let's just use the human ones since there are fewer and it won't take as long
+#isolated species names with cat mature.fa | grep '>' | cut -f 3,4 -d \  > mirBaseSpecies.txt
+
+species <- dat1 %>% 
+   tibble::as_tibble() %>% 
+   transmute(name = paste(V1 %>% as.character, V2 %>% as.character)) 
+
+human = grepl('Homo sapiens', species$name)
+allSeeds <- readRNAStringSet("~/mature.fa")
+##download mature.fa from: https://www.mirbase.org/ftp.shtml
+seedSeqs <- allSeeds %>% subseq(2,7) %>% DNAStringSet %>% unique
+humanSeedSeqs <- seedSeqs[human] %>% unique
+seedSeqs <- allSeeds %>% subseq(2,7) %>% DNAStringSet %>% unique
+
+haveSeedlist <- vwhichPDict(humanSeedSeqs, twelvemers) 
+#this takes ~40 minutes. All seeds takes ~1h45m
+save(list = c('twelvemers', 'haveSeedlist', 'humanSeedSeqs'), 
+     file = '~/haveHumanRNAiSeeds.RData')
+haveSeed <- sapply(haveSeedlist, function(x){length(x) > 0})
+twelvemers <- twelvemers[!haveSeed]
+cat(paste0('done removing those with mirSeeds at ', Sys.time()))
+print(length(twelvemers))
+
+
+```
+
+Sandbox
+
+```{r}
+setwd("C:/Users/proli/OneDrive - The Pennsylvania State University/2022 Carrel Liu Lab/Alzheimers Computational/2022 Barcode")
+library("Biostrings")
+library("tidyverse")
+library("immunarch")
+library("universalmotif")
+nucruns <- vector(mode = 'character', length = 4) %>% DNAStringSet
+ni = 1
+for (i in 4) {
+  for (j in c('A', 'G', 'T', 'C')) {
+    nucruns[ni] = rep(j, i) %>% 
+      paste(collapse = '') %>% 
+      DNAStringSet
+    ni = ni + 1
+  }
+}
+
+
+twelvemers <- create_sequences("DNA", 200, 10, rng.seed = sample.int(10000, 1)) %>% 
+  DNAStringSet 
+cat(paste0('done generating 12mers at ', Sys.time()))
+
+#Each nucleotide occurs at least once
+missingone <- apply(alphabetFrequency(twelvemers)[,1:4], 1, function(x){any(x == 0)})
+twelvemers <- twelvemers[!missingone]
+cat(paste0('done removing twelvemers missing a nucleotide at ', Sys.time()))
+
+#Cut out those with nucleotide runs of 4 or more in a row
+hasnucruns <- vcountPDict(nucruns, twelvemers) %>% 
+  colSums
+hasnucruns <- hasnucruns > 0
+twelvemers <- twelvemers[!hasnucruns]
+cat(paste0('done removing 12mers with runs of 4 or more at ', Sys.time()))
+print(twelvemers
+      )
+
+#Cut out those that match the miRNA seed sequences 
+#For now let's just use the human ones since there are fewer and it won't take as long
+#isolated species names with cat mature.fa | grep '>' | cut -f 3,4 -d \  > mirBaseSpecies.txt
+
+species <- dat1 %>% 
+   tibble::as_tibble()
+print(species)
+#convert dat1 to tibble named "species"
+
+human <- grepl('Homo sapiens', species$specie)
+#looks for Home sapiens in species file and pulls those, redundant
+print(human)
+allSeeds <- readRNAStringSet("~/mature.fa")
+#download mature.fa from: https://www.mirbase.org/ftp.shtml
+seedSeqs <- allSeeds %>% subseq(2,7) %>% DNAStringSet %>% unique
+humanSeedSeqs <- seedSeqs[human] %>% unique
+seedSeqs <- allSeeds %>% subseq(2,7) %>% DNAStringSet %>% unique
+
+haveSeedlist <- vwhichPDict(humanSeedSeqs, twelvemers) 
+#this takes ~40 minutes. All seeds takes ~1h45m
+save(list = c('twelvemers', 'haveSeedlist', 'humanSeedSeqs'), 
+     file = '~/haveHumanRNAiSeeds.csv')
+haveSeed <- sapply(haveSeedlist, function(x){length(x) > 0})
+twelvemers <- twelvemers[!haveSeed]
+cat(paste0('done removing those with mirSeeds at ', Sys.time()))
+print(length(twelvemers))
+
+save(twelvemers, file = '~/inertTwelveMers.csv')
