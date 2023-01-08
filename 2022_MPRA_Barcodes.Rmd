@@ -1,0 +1,134 @@
+---
+title: "MPRA Barcodes"
+output:
+  html_document:
+    df_print: paged
+---
+
+miRNAseed sequence is in a .fa, so use Winzip to open and then convert to .txt format Next issue is that the format uses two rows per information, which doesn't work for reading into a table
+
+Solution:
+
+```{r}
+setwd("/Users/jregan/Library/CloudStorage/OneDrive-ThePennsylvaniaStateUniversity/2022 Carrel Liu Lab/JRegan_SharedFiles/2022 Barcode")
+library("tidyverse")
+library("phylotools")
+
+list.files()
+##printing out files in the working directory so that you can make sure the 
+##expected one are there
+link <-"allmiRNAseed.txt"
+##file came from https://www.mirbase.org/ftp.shtml, mature.fa file.
+##this file has fasta format sequences of all mature miRNA sequences
+##file was converted to a txt file for analysis ease
+##function to create a variable of the file
+rawlines <-readLines(file(link))
+##Read the raw lines
+##Convert to one text string
+lines <- paste(rawlines[c(TRUE, FALSE)], rawlines[c(FALSE, TRUE)], 
+               collapse = "\n")
+##paste is used to combine multiple 
+##rawlines[c(TRUE, FALSE)] represents the odd lines, 
+##rawlines[c(FALSE, TRUE)] represents the even lines.
+##Both small lines are combined to one long line. 
+##Then, all long lines are combined into one single string 
+##with the argument collapse = "\n". 
+##The lines are separated by line breaks (\n).
+dat <- read.table(text = lines, na.string = "*") %>%
+unite(specie, V3, V4) 
+##read the txt file into a table
+HumanmiRNAseeds <-filter(dat, specie == "Homo_sapiens") %>%
+  subset(select = c(V1, V6))
+colnames(HumanmiRNAseeds)<-c('seq.name', 'seq.text')
+##filter to only include Homo sapiens and columns of interest
+print(HumanmiRNAseeds)
+dat2fasta(HumanmiRNAseeds, "HumanmiRNAseedsF.fasta")
+##convert file back to fasta file
+```
+
+`
+
+```{r}
+setwd("/Users/jregan/Library/CloudStorage/OneDrive-ThePennsylvaniaStateUniversity/2022 Carrel Liu Lab/JRegan_SharedFiles/2022 Barcode")      
+library("Biostrings")
+library("tidyverse")
+library("universalmotif")
+
+##create string of 4 same nucleotide run for later filtration
+##so a set with 4 objects (AAAA, GGGG, TTTT, CCCC)
+nucruns <- vector(mode = 'character', length = 4) %>% DNAStringSet
+ni = 1
+for (i in 4) {
+  for (j in c('A', 'G', 'T', 'C')) {
+    nucruns[ni] = rep(j, i) %>% paste(collapse = '') %>% DNAStringSet
+    ni = ni + 1
+  }
+}
+
+barcodes <- create_sequences("DNA", 20000, 10, rng.seed = 1) %>% DNAStringSet 
+##create a set of 200 random DNA sequences with a length of 10, & set the seed
+##then convert to a DNAStringSet for downstream work
+paste0('Sample of random sequences generated')
+head(barcodes)
+cat(paste0('done generating barcodes at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+#Each nucleotide occurs at least once
+##rule from MPRA original paper: Melnikov 2012
+missingone <- apply(alphabetFrequency(barcodes)[,1:4], 1, function(x){any(x == 0)})
+##creates a list of barcodes that are missing a nucleotide in the twelvemer file
+barcodes <- barcodes[!missingone]
+##removes sequences that lack any of the nucleotides
+cat(paste0('done removing barcodes missing a nucleotide at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+##No reference for this rule, but was in the original MPRA paper
+
+#Cut out those with nucleotide runs of 4 or more in a row
+hasnucruns <- vcountPDict(nucruns, barcodes) %>% colSums
+##finds matches from nucruns(runs of 4 or more) and creates a matrix of their location
+##sums the columns (sum of 1 or greater would have a run of 4 same nt)
+hasnucruns <- hasnucruns > 0
+##convert to TRUE/FALSE
+barcodes <- barcodes[!hasnucruns]
+##removes those with runs
+cat(paste0('done removing barcodes with runs of 4 or more at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+#Cut out those that start with TCT(creates an alternative digestion site for XbaI) 
+##Also TCT motif (polypyrimidine initiator) encompasses the transcription start 
+##site of nearly all ribosomal protein genes in Drosophila and mammals.
+seqremove <-DNAStringSet("TCT")
+##create string with TCT
+TCTseq <- vcountPDict(seqremove, barcodes) %>% colSums
+##check sequence for TCT and sum the columns with TCT present
+TCTseq <-TCTseq > 0
+barcodes <- barcodes[!TCTseq]
+##remove TCT sequences based on column sums greater than 0
+cat(paste0('done removing sequences with TCT', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+#Cut out those that match the miRNA seed sequences
+allSeeds <- readRNAStringSet("HumanmiRNAseedsF.fasta") 
+##read RNA in, must be FASTA file
+allSeedsmRNA<-Biostrings::complement(allSeeds)
+##convert RNA to complementary mRNA (of which the miRNA would bind with)
+allSeedsDNA<-DNAStringSet(allSeedsmRNA) %>% unique
+##convert mRNA to DNA to filter against
+seedSeqs <- allSeedsDNA %>% subseq(2,7) %>% unique
+##make a table with just 2-7 nucleotides
+
+haveSeedlist <- vwhichPDict(seedSeqs, barcodes) 
+#this takes ~40 minutes. All seeds takes ~1h45m
+save(list = c('barcodes', 'haveSeedlist'), 
+     file = '~/haveHumanRNAiSeeds.RData')
+haveSeed <- sapply(haveSeedlist, function(x){length(x) > 0})
+barcodes <- barcodes[!haveSeed]
+cat(paste0('done removing those with mirSeeds at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+write.csv(barcodes,'/Users/jregan/Library/CloudStorage/OneDrive-ThePennsylvaniaStateUniversity/2022 Carrel Liu Lab/JRegan_SharedFiles/2022 Barcode/inertTwelveMers.csv')
+```
