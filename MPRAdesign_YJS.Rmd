@@ -1,0 +1,84 @@
+---
+title: "MPRA Barcodes"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+setwd("/Users/yshibata/Documents/RStudio Docs/MPRAdesign")
+library("tidyverse")
+library("phylotools")
+
+list.files()
+link <- "AllmiRNAseeds.txt"
+rawlines <- readLines(file(link))
+lines <- paste(rawlines[c(TRUE, FALSE)], rawlines[c(FALSE, TRUE)], collapse = "\n")
+dat <- read.table(text = lines, na.string = "*") %>%
+unite(species, V3, V4)
+HumanmiRNAseeds <- filter(dat, species == "Homo_sapiens") %>%
+  subset(select = c(V1, V6))
+colnames(HumanmiRNAseeds) <- c('seq.name', 'seq.text')
+print(HumanmiRNAseeds)
+dat2fasta(HumanmiRNAseeds, "HumanmiRNAseedsF.fasta")
+```
+
+`
+
+```{r}
+setwd("/Users/yshibata/Documents/RStudio Docs/MPRAdesign")
+library("Biostrings")
+library("tidyverse")
+library("universalmotif")
+
+nucruns <- vector(mode = 'character', length = 4) %>% DNAStringSet
+ni = 1
+for (i in 4) {
+  for (j in c('A', 'G', 'T', 'C')) {
+    nucruns[ni] = rep(j, i) %>% paste(collapse = '') %>% DNAStringSet
+    ni = ni + 1
+  }
+}
+
+barcodes <- create_sequences("DNA", 20000, 10, rng.seed = 1) %>% DNAStringSet
+paste0('Sample of random sequences generated')
+head(barcodes)
+cat(paste0('done generating bacrcodes at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+missingone <- apply(alphabetFrequency(barcodes) [,1:4], 1, function(x){any(x == 0)})
+barcodes <- barcodes[!missingone]
+cat(paste0('done removing barcodes missing a nucleotide at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+hasnucruns <- vcountPDict(nucruns, barcodes) %>% colSums
+hasnucruns <- hasnucruns > 0
+barcodes <- barcodes[!hasnucruns]
+cat(paste0('done removing barcodes with runs of 4 or more at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+seqremove <- DNAStringSet("TCT")
+TCTseq <- vcountPDict(seqremove, barcodes) %>% colSums
+TCTseq <- TCTseq > 0
+barcodes <- barcodes[!TCTseq]
+cat(paste0('done removing sequences with TCT', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+
+allSeeds <- readRNAStringSet("HumanmiRNAseedsF.fasta")
+allSeedsmRNA <- Biostrings::complement(allSeeds)
+allSeedsDNA <- DNAStringSet(allSeedsmRNA) %>% unique
+seedSeqs <- allSeedsDNA %>% subseq(2, 7) %>% unique
+
+haveSeedlist <- vwhichPDict(seedSeqs, barcodes)
+save(list = c('barcodes', 'haveSeedlist'), file = '~/haveHumanRNAiSeeds.RData')
+haveSeed <- sapply(haveSeedlist, function(x){length(x) > 0})
+barcodes <- barcodes[!haveSeed]
+cat(paste0('done removing those with mirSeeds at ', Sys.time()))
+print(length(barcodes))
+summary(barcodes)
+write.csv(barcodes,'/Users/yshibata/Documents/RStudio Docs/MPRAdesign/inertTwelveMers.csv')
+```
